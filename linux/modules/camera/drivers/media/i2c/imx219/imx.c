@@ -1271,12 +1271,12 @@ int imx_s_hilight(struct v4l2_subdev *sd, s32 value)
 
 	printk("%s: hilight = %d\n", __func__, value);
 	if (value == 1) {
-		imx_write_reg(client, IMX_16BIT, 0x0176, 0x1); //H direction
-		imx_write_reg(client, IMX_16BIT, 0x0177, 0x1); //V direction
+		imx_write_reg(client, IMX_8BIT, 0x0176, 0x1); //H direction
+		imx_write_reg(client, IMX_8BIT, 0x0177, 0x1); //V direction
 		BINNING_SUM = 1;
 	} else {
-		imx_write_reg(client, IMX_16BIT, 0x0176, 0x0); //H direction
-		imx_write_reg(client, IMX_16BIT, 0x0177, 0x0); //V direction
+		imx_write_reg(client, IMX_8BIT, 0x0176, 0x0); //H direction
+		imx_write_reg(client, IMX_8BIT, 0x0177, 0x0); //V direction
 		BINNING_SUM = 0;
 	}
 	return 0;
@@ -1963,11 +1963,11 @@ static int imx_s_mbus_fmt(struct v4l2_subdev *sd,
 		goto out;
 
 	if(BINNING_SUM == 1) {
-		imx_write_reg(client, IMX_16BIT, 0x0176, 0x1); //H direction
-		imx_write_reg(client, IMX_16BIT, 0x0177, 0x1); //V direction
+		imx_write_reg(client, IMX_8BIT, 0x0176, 0x1); //H direction
+		imx_write_reg(client, IMX_8BIT, 0x0177, 0x1); //V direction
 	}else{
-		imx_write_reg(client, IMX_16BIT, 0x0176, 0x0); //H direction
-		imx_write_reg(client, IMX_16BIT, 0x0177, 0x0); //V direction
+		imx_write_reg(client, IMX_8BIT, 0x0176, 0x0); //H direction
+		imx_write_reg(client, IMX_8BIT, 0x0177, 0x0); //V direction
 	}
 
 	dev->fps = dev->curr_res_table[dev->fmt_idx].fps_options[dev->fps_index].fps;

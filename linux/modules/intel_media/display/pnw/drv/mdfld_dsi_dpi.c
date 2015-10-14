@@ -646,6 +646,11 @@ reset_recovery:
 	for (i = 0; i < 256; i++)
 		REG_WRITE(regs->palette_reg + (i<<2), ctx->palette[i]);
 
+	/* restore gamma max value */
+	REG_WRITE(regs->gamma_red_max_reg, ctx->gamma_red_max);
+	REG_WRITE(regs->gamma_green_max_reg, ctx->gamma_green_max);
+	REG_WRITE(regs->gamma_blue_max_reg, ctx->gamma_blue_max);
+
 #ifdef CONFIG_CTP_DPST
 	/* restore dpst setting */
 	if (dev_priv->psb_dpst_state) {
@@ -850,6 +855,11 @@ static int __dpi_panel_power_off(struct mdfld_dsi_config *dsi_config,
 	/* save palette (gamma) */
 	for (i = 0; i < 256; i++)
 		ctx->palette[i] = REG_READ(regs->palette_reg + (i<<2));
+
+	/* save gamma max value */
+	ctx->gamma_red_max = REG_READ(regs->gamma_red_max_reg);
+	ctx->gamma_green_max = REG_READ(regs->gamma_green_max_reg);
+	ctx->gamma_blue_max = REG_READ(regs->gamma_blue_max_reg);
 
 	/*
 	 * Couldn't disable the pipe until DRM_WAIT_ON signaled by last

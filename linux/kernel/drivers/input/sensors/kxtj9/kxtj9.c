@@ -124,6 +124,7 @@ extern int Read_HW_ID(void);
 #define KXTJ2_CHIP_LOCATION_SR_A450CG		7	//	X(0 , 1 , 0 );	Y(1 , 0 , 0);	Z(0 , 0 , -1)
 #define KXTJ2_CHIP_LOCATION_SR_FE380CG		8	//	X(0 , 1 , 0 );	Y(1 , 0 , 0);	Z(0 , 0 , -1)
 #define KXTJ2_CHIP_LOCATION_SR_TX201LAF		9	//	X(0 , 1 , 0 );	Y(1 , 0 , 0);	Z(0 , 0 , -1)
+#define KXTJ2_CHIP_LOCATION_SR_ZC400CG		10	//	X(-1 , 0 , 0 );	Y(0 , 1 , 0);	Z(0 , 0 , -1)
 int g_ilocation=-1;
 
 #define WHOAMI_VALUE_FOR_KXTJ9	8
@@ -167,6 +168,9 @@ int gpio_invensense = 76;
 int KXTJ9_DEBUG_MESSAGE=0;
 int KXTJ9_REG_MESSAGE=0;
 int KXTJ9_CALIBRATED_MESSAGE=1;
+
+#define KXTJ9_ST_LATE_RESUME		0
+#define KXTJ9_ST_EARLY_SUSPEND	1
 
 #define KXTJ9_RESUME_DISABLE		0
 #define KXTJ9_RESUME_ENABLE		1
@@ -497,18 +501,19 @@ static void kxtj9_report_acceleration_data(struct kxtj9_data *tj9)
 
 		case KXTJ2_CHIP_LOCATION_SR_PF400CG : 
 		case KXTJ2_CHIP_LOCATION_SR_A400CG : 
+		case KXTJ2_CHIP_LOCATION_SR_ZC400CG :
 			if(g_KXTJ9_CLIBRATION_6_PLANES){
 				if( (tj9->accel_cal_sensitivity[0]==0)||(tj9->accel_cal_sensitivity[1]==0)||(tj9->accel_cal_sensitivity[2]==0) ){
 					reportdata_x = rawdata_x*(-1);
 					reportdata_y = rawdata_y;
 					reportdata_z = rawdata_z*(-1);
-					if(KXTJ9_DEBUG_MESSAGE) printk("alp : KXTJ2_CHIP_LOCATION_SR_PF400CG default\n");
+					if(KXTJ9_DEBUG_MESSAGE) printk("alp : KXTJ2_CHIP_LOCATION_SR_X400CG default\n");
 				}
 				else{
 					reportdata_x = (-1024)*(rawdata_x - tj9->accel_cal_offset[0])/tj9->accel_cal_sensitivity[0];
 					reportdata_y = 1024*(rawdata_y - tj9->accel_cal_offset[1])/tj9->accel_cal_sensitivity[1];
 					reportdata_z = (-1024)*(rawdata_z - tj9->accel_cal_offset[2])/tj9->accel_cal_sensitivity[2];
-					if(KXTJ9_DEBUG_MESSAGE) printk("alp : KXTJ2_CHIP_LOCATION_SR_PF400CG calibration\n");
+					if(KXTJ9_DEBUG_MESSAGE) printk("alp : KXTJ2_CHIP_LOCATION_SR_X400CG calibration\n");
 				}
 			}else{
 				reportdata_x = (rawdata_x - tj9->accel_cal_offset[0])*(-1);
@@ -799,7 +804,7 @@ static int kxtj9_enable(struct kxtj9_data *tj9)
 
 	if(KXTJ9_DEBUG_MESSAGE) printk("alp:kxtj9_enable ++\n");
 
-	if(tj9->suspend_resume_state==1){
+	if(tj9->suspend_resume_state==KXTJ9_ST_EARLY_SUSPEND){
 		printk("alp : kxtj9_enable  already suspend return !\n");
 		tj9->resume_enable=KXTJ9_RESUME_MISSENABLE;
 		return 0;
@@ -867,6 +872,12 @@ fail:
 static void kxtj9_disable(struct kxtj9_data *tj9)
 {
 	unsigned long flags;
+
+	if( (tj9->suspend_resume_state == KXTJ9_ST_EARLY_SUSPEND)&&(tj9->resume_enable ==KXTJ9_RESUME_ENABLE) ){
+		tj9->resume_enable = KXTJ9_RESUME_DISABLE;
+		printk("alp : kxtj9_disable  suspend and re-disable by AP !!\n");
+	}
+		
 	if(atomic_read(&tj9->enabled)==0){
 		printk("alp : kxtj9_disable  already disable , return !!\n");
 		return ;
@@ -1108,7 +1119,7 @@ static ssize_t kxtj9_enable_store(struct device *dev,
 	struct kxtj9_data *tj9 = i2c_get_clientdata(client);
 	int val = simple_strtoul(buf, NULL, 10);
 
-	if(tj9->suspend_resume_state==1){
+	if(tj9->suspend_resume_state==KXTJ9_ST_EARLY_SUSPEND){
 		printk("alp : kxtj9_enable_store  already suspend return miss status : (%d)!\n",val);
 		if(val==KXTJ9_RESUME_ENABLE)
 			tj9->resume_enable=KXTJ9_RESUME_MISSENABLE;
@@ -1171,7 +1182,7 @@ static ssize_t get_rawdata(struct device *dev, struct device_attribute *devattr,
 	retval = atomic_read(&tj9->enabled);
 	printk("alp : get_rawdata enable state=(%d)\n",retval);
 
-	if(tj9->suspend_resume_state==1){
+	if(tj9->suspend_resume_state==KXTJ9_ST_EARLY_SUSPEND){
 		printk("alp : get_rawdata  already suspend return miss action!\n");
 		data[0]=g_kxtj_for_calibration[0];
 		data[1]=g_kxtj_for_calibration[1];
@@ -1185,7 +1196,7 @@ static ssize_t get_rawdata(struct device *dev, struct device_attribute *devattr,
 
 	if(retval==0){
 		retval = kxtj9_enable(tj9);
-		msleep(100);
+		mdelay(100);
 		if (retval < 0){
 			printk("ATTR power on fail\n");
 			return retval;
@@ -1325,8 +1336,8 @@ static ssize_t reset_kxtj9_calibration(struct device *dev, struct device_attribu
 		if(tj9->accel_cal_sensitivity[2]==0)
 			tj9->accel_cal_sensitivity[2]=1024;
 	}else{
-		// for PF400CG, A400CG, A450CG, ME372CL
-		if( (g_ilocation == KXTJ2_CHIP_LOCATION_SR_PF400CG) || (g_ilocation == KXTJ2_CHIP_LOCATION_SR_A400CG) ||(g_ilocation == KXTJ2_CHIP_LOCATION_SR_A450CG) ||(g_ilocation == KXTJ2_CHIP_LOCATION_ER_ME372CL) ){
+		// for PF400CG, A400CG, A450CG, ME372CL,ZC400CG
+		if( (g_ilocation == KXTJ2_CHIP_LOCATION_SR_PF400CG) || (g_ilocation == KXTJ2_CHIP_LOCATION_SR_A400CG) ||(g_ilocation == KXTJ2_CHIP_LOCATION_SR_A450CG) ||(g_ilocation == KXTJ2_CHIP_LOCATION_ER_ME372CL) || (g_ilocation == KXTJ2_CHIP_LOCATION_SR_ZC400CG) ){
 			//for X axis
 			tj9->accel_cal_offset[0]=tj9->accel_cal_data[1];
 			if( (tj9->accel_cal_offset[0]<up_calibration_limit) && (tj9->accel_cal_offset[0]>down_calibration_limit) )
@@ -1753,10 +1764,11 @@ static void kxtj9_early_suspend(struct early_suspend *h)
 	int status=0;
 
 	mutex_lock(&input_dev->mutex);
-	tj9->suspend_resume_state = 1;
+	tj9->suspend_resume_state = KXTJ9_ST_EARLY_SUSPEND;
 	// update enable status
 	status = 	tj9->ctrl_reg1 >> 7;
 	printk("alp : kxtj9_early_suspend enable(%d)\n",status);
+	kxtj9_disable(tj9);
 	if(status==KXTJ9_RESUME_ENABLE){
 		printk("alp : kxtj, need to enable after resume!\n");
 		tj9->resume_enable = KXTJ9_RESUME_ENABLE;
@@ -1764,7 +1776,6 @@ static void kxtj9_early_suspend(struct early_suspend *h)
 	else{
 		tj9->resume_enable = KXTJ9_RESUME_DISABLE;
 	}
-	kxtj9_disable(tj9);
 	mutex_unlock(&input_dev->mutex);
 	printk("alp : kxtj9_early_suspend irq(%d)\n",tj9->irq);
 }
@@ -1775,8 +1786,8 @@ static void kxtj9_late_resume(struct early_suspend *h)
 	struct input_dev *input_dev = tj9->input_dev;
 
 	mutex_lock(&input_dev->mutex);
+	tj9->suspend_resume_state = KXTJ9_ST_LATE_RESUME;
 	if( (tj9->resume_enable==KXTJ9_RESUME_ENABLE)||(tj9->resume_enable==KXTJ9_RESUME_MISSENABLE) ){
-		tj9->suspend_resume_state = 0;
 		kxtj9_enable(tj9);
 		printk("alp : kxtj9_late_resume enable\n");
 	}else
@@ -1947,6 +1958,10 @@ static int kxtj9_probe(struct i2c_client *client,
 	g_ilocation = KXTJ2_CHIP_LOCATION_SR_TX201LAF;
 #endif
 
+#ifdef CONFIG_ZC400CG
+	g_ilocation = KXTJ2_CHIP_LOCATION_SR_ZC400CG;
+#endif
+
 // for enable motion detect , added by cheng_kao 2014.02.12 ++
 #ifdef KXTJ2_BUILD_MOTION_DETECT
 	if(build_version==1){	// 1:eng ; 2:user ; 3:userdebug 
@@ -1966,7 +1981,7 @@ static int kxtj9_probe(struct i2c_client *client,
 #endif
 // for enable motion detect , added by cheng_kao 2014.02.12 --
 
-	tj9->suspend_resume_state = 0;
+	tj9->suspend_resume_state = KXTJ9_ST_LATE_RESUME;
 	tj9->resume_enable = 0;
 	tj9->irq_status=1;
 	printk("alp : kxtj9_probe (%d) --\n", g_ilocation);

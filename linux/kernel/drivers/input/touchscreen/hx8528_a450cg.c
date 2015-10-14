@@ -7354,8 +7354,29 @@ static long himax_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 		break;
 	case TOUCH_TP_FW_check:
 		printk( "[Himax]:%s: TOUCH_FW_UPDATE_CHECK \n",__func__);
-		ret = himax_firmware_check();
-		printk( "[Himax]:%s: TOUCH_FW_UPDATE_CHECK = % d\n",__func__, ret);
+		//ret = himax_firmware_check();
+		printk( "[Himax]:%s: FW_VER_MAJ_buff[0]=%d \n",__func__, FW_VER_MAJ_buff[0]);
+		printk( "[Himax]:%s: FW_VER_MIN_buff[0]=%d \n",__func__, FW_VER_MIN_buff[0]);
+		printk( "[Himax]:%s: CFG_VER_MAJ_buff[11]=%d \n",__func__, CFG_VER_MAJ_buff[11]);
+		printk( "[Himax]:%s: CFG_VER_MIN_buff[11]=%d \n",__func__, CFG_VER_MIN_buff[11]);
+		if(himax_chip->TP_ID==3) // wintek GFF
+		{
+			printk( "[Himax]:%s: Wintel GFF TP FW version should be D0509.03.0D\n",__func__);
+			if((FW_VER_MAJ_buff[0]==5)&&(FW_VER_MIN_buff[0]==9)&&(CFG_VER_MAJ_buff[11]==3)&&(CFG_VER_MIN_buff[11]==13)) // D0509.03.0D
+				ret=1;
+			else
+				ret=0;
+		}
+		else
+		{
+			printk( "[Himax]:%s: Ofilm TP FW version should be D0509.00.0D\n",__func__);
+			if((FW_VER_MAJ_buff[0]==5)&&(FW_VER_MIN_buff[0]==9)&&(CFG_VER_MAJ_buff[11]==0)&&(CFG_VER_MIN_buff[11]==13)) // D0509.00.0D
+				ret=1;
+			else
+				ret=0;
+		}
+
+		printk( "[Himax]:%s: TOUCH_FW_UPDATE_CHECK = %d\n",__func__, ret);
 		return ret;
 	default:
 		printk( "[Himax]:%s: incorrect cmd (%d) \n",__FUNCTION__, _IOC_NR(cmd));
