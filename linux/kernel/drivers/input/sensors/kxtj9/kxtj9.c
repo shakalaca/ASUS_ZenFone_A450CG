@@ -182,6 +182,12 @@ int g_KXTJ9_CLIBRATION_6_PLANES=0;
 
 //#define KXTJ2_BUILD_MOTION_DETECT	1
 
+//cheng_kao 2014.10.07 for four methods
+//#define KXTJ_SPIN_LOCK		1
+//#define KXTJ_CONTROL_IRQ	1
+//#define KXTJ_MUTEX_LOCK	1
+#define KXTJ_BYPASS_IRQ	1
+
 //The following table lists the maximum appropriate poll interval for each available output data rate.
 #define KXTJ9_RES_8BIT	0
 #define KXTJ9_RES_12BIT	1
@@ -192,9 +198,9 @@ static const struct {
 } kxtj9_odr_table[] = {											// ms,	range,	mode
 	{ 15,			ODR200F,	KXTJ9_RES_12BIT},			// 2.5,	6~ 10	FASTEST MODE , full power mode
 	{ 35,			ODR50F,		KXTJ9_RES_12BIT},			// 20,	21~30	GAME MODE
-	{ 70,			ODR25F,		KXTJ9_RES_12BIT},				// 70,	31~70	UI MODE
-	{ 250,			ODR12_5F,	KXTJ9_RES_12BIT},				// 160,	71~250	NORMAL MODE
-	{ 0xFFFFFFFF,	ODR12_5F,	KXTJ9_RES_12BIT},				// 160,	251~max	NO POLL
+	{ 70,			ODR25F,		KXTJ9_RES_12BIT},			// 70,	31~70	UI MODE
+	{ 250,			ODR12_5F,	KXTJ9_RES_12BIT},			// 160,	71~250	NORMAL MODE
+	{ 0xFFFFFFFF,	ODR12_5F,	KXTJ9_RES_12BIT},			// 160,	251~max	NO POLL
 //	{ 0xFFFFFFFF,		ODR3_125F,	KXTJ9_RES_8BIT},				// 320,	251~max	NO POLL
 };
 /*	default
@@ -237,6 +243,7 @@ struct kxtj9_data {
 	int suspend_resume_state;
 	int resume_enable;
 	int irq_status;
+	int irq_bypass;
 // counter for reset chip by cheng_kao 2014.07.01 ++
 	int reset_counter;
 // counter for reset chip by cheng_kao 2014.07.01 --
@@ -252,7 +259,9 @@ struct kxtj9_data {
 	int motion_detect_timer;
 	int chip_interrupt_mode;
 #endif
+#ifdef KXTJ_SPIN_LOCK
 	spinlock_t lock;
+#endif
 // for enable motion detect , added by cheng_kao 2014.02.12 --
 };
 
@@ -500,7 +509,7 @@ static void kxtj9_report_acceleration_data(struct kxtj9_data *tj9)
 		break;
 
 		case KXTJ2_CHIP_LOCATION_SR_PF400CG : 
-		case KXTJ2_CHIP_LOCATION_SR_A400CG : 
+		case KXTJ2_CHIP_LOCATION_SR_A400CG :
 		case KXTJ2_CHIP_LOCATION_SR_ZC400CG :
 			if(g_KXTJ9_CLIBRATION_6_PLANES){
 				if( (tj9->accel_cal_sensitivity[0]==0)||(tj9->accel_cal_sensitivity[1]==0)||(tj9->accel_cal_sensitivity[2]==0) ){
@@ -708,6 +717,13 @@ static irqreturn_t kxtj9_isr(int irq, void *dev)
 	int err;
 
 	/* data ready is the only possible interrupt type */
+#ifdef  KXTJ_BYPASS_IRQ
+	if(tj9->irq_bypass==1){
+		printk("alp : bypass irq return !!\n");
+		return IRQ_HANDLED;
+	}
+#endif
+
 	kxtj9_report_acceleration_data(tj9);
 	err = i2c_smbus_read_byte_data(tj9->client, INT_REL);
 	if (err < 0){
@@ -801,6 +817,9 @@ static int kxtj9_enable(struct kxtj9_data *tj9)
 {
 	int err;
 	unsigned long flags;
+//#ifdef  KXTJ_MUTEX_LOCK
+//	struct input_dev *input_dev = tj9->input_dev;
+//#endif
 
 	if(KXTJ9_DEBUG_MESSAGE) printk("alp:kxtj9_enable ++\n");
 
@@ -814,15 +833,6 @@ static int kxtj9_enable(struct kxtj9_data *tj9)
 		printk("alp : kxtj9_enable  already enable , return 0\n");
 		return 0;
 	}
-
-	spin_lock_irqsave(&tj9->lock,flags);
-//	spin_lock(&tj9->lock);
-	if(tj9->irq_status==0){
-		enable_irq(tj9->irq);
-		tj9->irq_status = 1;
-	}
-//	spin_unlock(&tj9->lock);
-	spin_unlock_irqrestore(&tj9->lock,flags);
 
 	/* ensure that PC1 is cleared before updating control registers */
 	err = i2c_smbus_write_byte_data(tj9->client, CTRL_REG1, 0);
@@ -856,7 +866,7 @@ static int kxtj9_enable(struct kxtj9_data *tj9)
 	if (tj9->irq) {
 		err = i2c_smbus_read_byte_data(tj9->client, INT_REL);
 		if (err < 0) {
-			if(KXTJ9_DEBUG_MESSAGE) printk("alp : error clearing interrupt: %d\n",err)	;
+			printk("alp.D : error clearing interrupt: %d\n",err);
 			goto fail;
 		}
 	}
@@ -872,6 +882,9 @@ fail:
 static void kxtj9_disable(struct kxtj9_data *tj9)
 {
 	unsigned long flags;
+//#ifdef  KXTJ_MUTEX_LOCK
+//	struct input_dev *input_dev = tj9->input_dev;
+//#endif
 
 	if( (tj9->suspend_resume_state == KXTJ9_ST_EARLY_SUSPEND)&&(tj9->resume_enable ==KXTJ9_RESUME_ENABLE) ){
 		tj9->resume_enable = KXTJ9_RESUME_DISABLE;
@@ -882,14 +895,6 @@ static void kxtj9_disable(struct kxtj9_data *tj9)
 		printk("alp : kxtj9_disable  already disable , return !!\n");
 		return ;
 	}
-
-	spin_lock_irqsave(&tj9->lock,flags);
-	if(tj9->irq_status==1){
-		disable_irq(tj9->irq);
-		tj9->irq_status = 0;
-	}
-	spin_unlock_irqrestore(&tj9->lock,flags);
-
 	kxtj9_device_power_off(tj9);
 	atomic_set(&tj9->enabled, 0);
 }
@@ -1121,6 +1126,7 @@ static ssize_t kxtj9_enable_store(struct device *dev,
 
 	if(tj9->suspend_resume_state==KXTJ9_ST_EARLY_SUSPEND){
 		printk("alp : kxtj9_enable_store  already suspend return miss status : (%d)!\n",val);
+//		dump_stack();
 		if(val==KXTJ9_RESUME_ENABLE)
 			tj9->resume_enable=KXTJ9_RESUME_MISSENABLE;
 		if(val==KXTJ9_RESUME_DISABLE)
@@ -1765,6 +1771,9 @@ static void kxtj9_early_suspend(struct early_suspend *h)
 
 	mutex_lock(&input_dev->mutex);
 	tj9->suspend_resume_state = KXTJ9_ST_EARLY_SUSPEND;
+#ifdef  KXTJ_BYPASS_IRQ
+	tj9->irq_bypass=1;
+#endif
 	// update enable status
 	status = 	tj9->ctrl_reg1 >> 7;
 	printk("alp : kxtj9_early_suspend enable(%d)\n",status);
@@ -1777,6 +1786,29 @@ static void kxtj9_early_suspend(struct early_suspend *h)
 		tj9->resume_enable = KXTJ9_RESUME_DISABLE;
 	}
 	mutex_unlock(&input_dev->mutex);
+#ifdef  KXTJ_SPIN_LOCK
+	printk("alp.D : disbale use the spin_lock_irqsave !!\n");
+	spin_lock_irqsave(&tj9->lock,flags);
+#endif
+#ifdef  KXTJ_MUTEX_LOCK
+	printk("alp.D : disbale use the mutex_lock !!\n");
+	mutex_lock(&input_dev->mutex);
+#endif
+#ifdef  KXTJ_CONTROL_IRQ
+	if(tj9->irq_status==1){
+//		mdelay(10);
+		disable_irq(tj9->irq);
+		tj9->irq_status = 0;
+		printk("alp.D : disable the irq \n");
+	}
+#endif
+#ifdef  KXTJ_MUTEX_LOCK
+	mutex_unlock(&input_dev->mutex);
+#endif
+#ifdef  KXTJ_SPIN_LOCK
+	spin_unlock_irqrestore(&tj9->lock,flags);
+#endif
+
 	printk("alp : kxtj9_early_suspend irq(%d)\n",tj9->irq);
 }
 
@@ -1785,6 +1817,28 @@ static void kxtj9_late_resume(struct early_suspend *h)
 	struct kxtj9_data *tj9 = container_of(h,struct kxtj9_data,kxtj9_early_suspendresume);
 	struct input_dev *input_dev = tj9->input_dev;
 
+#ifdef  KXTJ_SPIN_LOCK
+	printk("alp.D : enable use the spin_lock_irqsave !!\n");
+	spin_lock_irqsave(&tj9->lock,flags);
+#endif
+#ifdef  KXTJ_MUTEX_LOCK
+	printk("alp.D : enable use the mutex_lock !!\n");
+	mutex_lock(&input_dev->mutex);
+#endif
+#ifdef  KXTJ_CONTROL_IRQ
+	if(tj9->irq_status==0){
+		enable_irq(tj9->irq);
+		tj9->irq_status = 1;
+		printk("alp.D : enable the irq \n");
+	}
+#endif
+#ifdef  KXTJ_MUTEX_LOCK
+	mutex_unlock(&input_dev->mutex);
+#endif
+#ifdef  KXTJ_SPIN_LOCK
+	spin_unlock_irqrestore(&tj9->lock,flags);
+#endif
+
 	mutex_lock(&input_dev->mutex);
 	tj9->suspend_resume_state = KXTJ9_ST_LATE_RESUME;
 	if( (tj9->resume_enable==KXTJ9_RESUME_ENABLE)||(tj9->resume_enable==KXTJ9_RESUME_MISSENABLE) ){
@@ -1792,6 +1846,9 @@ static void kxtj9_late_resume(struct early_suspend *h)
 		printk("alp : kxtj9_late_resume enable\n");
 	}else
 		printk("alp : kxtj9_late_resume pass enable\n");
+#ifdef  KXTJ_BYPASS_IRQ
+	tj9->irq_bypass=0;
+#endif
 	mutex_unlock(&input_dev->mutex);
 	printk("alp : kxtj9_late_resume irq(%d)\n",tj9->irq);
 }
@@ -1984,9 +2041,12 @@ static int kxtj9_probe(struct i2c_client *client,
 	tj9->suspend_resume_state = KXTJ9_ST_LATE_RESUME;
 	tj9->resume_enable = 0;
 	tj9->irq_status=1;
+	tj9->irq_bypass=0;
 	printk("alp : kxtj9_probe (%d) --\n", g_ilocation);
 
+#ifdef  KXTJ_SPIN_LOCK
 	spin_lock_init(&tj9->lock);
+#endif
 
 	return 0;
 
