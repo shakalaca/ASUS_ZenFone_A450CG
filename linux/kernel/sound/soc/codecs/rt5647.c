@@ -157,6 +157,7 @@ static struct rt5647_init_reg init_list[] = {
 	{ RT5647_CJ_CTRL2       , 0x0027 }, // joe_cheng : add for headphone detection
 	{ RT5647_DRC1_HL_CTRL2  , 0x0700 },
 //	{ RT5647_DIG_INF1_DATA  , 0x1102 },
+	{ RT5647_CJ_CTRL3       , 0xc000}, // joe_cheng : update for jack detection 
 };
 #define RT5647_INIT_REG_LEN ARRAY_SIZE(init_list)
 
@@ -205,7 +206,7 @@ static const u16 rt5647_reg[RT5647_VENDOR_ID2 + 1] = {
 	[RT5647_MONO_OUT] = 0xc600,
 	[RT5647_CJ_CTRL1] = 0x0002,
 	[RT5647_CJ_CTRL2] = 0x0827,
-	[RT5647_CJ_CTRL3] = 0xe000,
+	[RT5647_CJ_CTRL3] = 0xc000, // joe_cheng : update for jack detection 
 	[RT5647_INL1_INR1_VOL] = 0x0808,
 	[RT5647_SIDETONE_CTRL] = 0x018b,
 	[RT5647_DAC1_DIG_VOL] = 0xafaf,
@@ -717,9 +718,16 @@ int rt5647_headset_detect(struct snd_soc_codec *codec, int jack_insert)
 			RT5647_CBJ_MN_JD, 0);
 		snd_soc_update_bits(codec, RT5647_CJ_CTRL2,
 			RT5647_CBJ_MN_JD, RT5647_CBJ_MN_JD);
-		msleep(400);
-		val = snd_soc_read(codec, RT5647_CJ_CTRL3) & 0x7;
-		pr_debug("%s: MX-0C val=%d\n", __func__, val);
+		
+		int i = 0, sleep_time[4] = {300, 150, 100, 50, 25};
+		while(i < 5){
+			msleep(sleep_time[i]);
+			val = snd_soc_read(codec, RT5647_CJ_CTRL3) & 0x7;
+			pr_debug("%s: %d MX-0C val=%d sleep %d\n", __func__, i, val, sleep_time[i]);
+			i++;
+			if (val == 0x1 || val == 0x2 || val == 0x4)
+				break; 
+		}
 
 		switch (val) {
 		case 0x1: /* Nokia type*/
@@ -3771,6 +3779,7 @@ static int rt5647_remove(struct snd_soc_codec *codec)
 static int rt5647_suspend(struct snd_soc_codec *codec)
 {
 	rt5647_set_bias_level(codec, SND_SOC_BIAS_OFF);
+	pr_debug("%s()\n", __func__);
 	return 0;
 }
 
@@ -3780,6 +3789,7 @@ static int rt5647_resume(struct snd_soc_codec *codec)
 	codec->cache_sync = 1;
 	snd_soc_cache_sync(codec);
 	rt5647_index_sync(codec);
+	pr_debug("%s()\n", __func__);
 	return 0;
 }
 #else

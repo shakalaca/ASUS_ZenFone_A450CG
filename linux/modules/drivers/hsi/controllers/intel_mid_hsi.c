@@ -81,6 +81,8 @@
 #define DMA_BUSY(ch)		(1<<(ch))
 #define QUEUE_BUSY(ch)		(1<<(ch))
 
+#define HSI_WAKELOCK_TIMEOUT 5000 /* 5 sec */
+
 /* TX, RX and PM states */
 enum {
 	TX_SLEEPING,
@@ -572,7 +574,7 @@ static inline void hsi_pm_wake_lock(struct intel_controller *intel_hsi)
 
 	spin_lock_irqsave(&intel_hsi->hw_lock, flags);
 	if (intel_hsi->suspend_state != DEVICE_READY)
-		wake_lock(&intel_hsi->stay_awake);
+		wake_lock_timeout(&intel_hsi->stay_awake, msecs_to_jiffies(HSI_WAKELOCK_TIMEOUT));
 	spin_unlock_irqrestore(&intel_hsi->hw_lock, flags);
 #endif
 }
@@ -600,6 +602,22 @@ static void hsi_pm_runtime_get_sync(struct intel_controller *intel_hsi)
 {
 	hsi_pm_wake_lock(intel_hsi);
 	pm_runtime_get_sync(intel_hsi->pdev);
+}
+
+static void hsi_check_tx_state(struct intel_controller *intel_hsi)
+{
+	void __iomem *ctrl = intel_hsi->ctrl_io;
+	int version = intel_hsi->version;
+
+	int is_TX_queue_empty;
+
+	is_TX_queue_empty = ((ioread32(ARASAN_REG(HSI_STATUS))
+				& ARASAN_ALL_TX_EMPTY) == ARASAN_ALL_TX_EMPTY);
+
+	if (intel_hsi->tx_state != TX_SLEEPING && is_TX_queue_empty) {
+		pr_info (DRVNAME " : Clear tx_state\n");
+		intel_hsi->tx_state = TX_SLEEPING;
+	}
 }
 
 /**
@@ -1387,6 +1405,7 @@ static int hsi_ctrl_suspend(struct intel_controller *intel_hsi, int rtpm)
 #endif
 
 exit_ctrl_suspend:
+	hsi_check_tx_state (intel_hsi);
 	spin_unlock_irqrestore(&intel_hsi->hw_lock, flags);
 
 	return err;

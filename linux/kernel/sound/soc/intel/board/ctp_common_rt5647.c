@@ -476,7 +476,7 @@ int ctp_soc_jack_gpio_detect(void)
 	if (gpio->invert)
 		enable = !enable;
         pr_debug("%s:gpio->%d=0x%d jack_status %d\n", __func__, gpio->gpio, enable, jack->status);
-        msleep(gpio->debounce_time);
+    //    msleep(gpio->debounce_time);
 #ifdef CONFIG_HAS_WAKELOCK
 	/*
 	 * Take wakelock for one second to give time for the detection
@@ -484,7 +484,7 @@ int ctp_soc_jack_gpio_detect(void)
 	 * have big impact to power consumption.
 	 */
 	wake_lock_timeout(ctx->jack_wake_lock,
-		HPDETECT_POLL_INTERVAL + msecs_to_jiffies(300));
+		HPDETECT_POLL_INTERVAL + msecs_to_jiffies(1000));
 #endif
         msleep(ctx->ops->micsdet_debounce);
 	
